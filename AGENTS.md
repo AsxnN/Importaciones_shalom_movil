@@ -1,3 +1,23 @@
+# Reglas y Protocolos del Proyecto — Shalom Móvil
+
+## Documento Maestro de Contexto
+El archivo `/home/ludam/Importaciones/shalom_movil/CONTEXTO_SISTEMA.md` es la **Fuente de Verdad** técnica y arquitectónica de la aplicación móvil.
+
+## Protocolo Obligatorio para Desarrolladores y Agentes IA
+Cada vez que realices modificaciones en este repositorio:
+1. **Identifica el módulo o funcionalidad afectada:**
+   - Módulo 4 (MOD-04): Recepción Táctica, Conciliación Ciega y Cola Offline
+   - Módulo 2 (MOD-02): Consulta de Stock y Movimientos Inmediatos
+   - Módulo 5 (MOD-05): Conteo Masivo y Auditoría ERI Móvil
+   - Configuración, Diagnóstico y Conexión Supabase
+2. **Actualiza `CONTEXTO_SISTEMA.md`:**
+   - Si creas, modificas o eliminas pantallas, componentes o utilidades en `src/` o `App.tsx`, actualiza la lista de componentes frontend del documento.
+   - Si cambias llamadas a Supabase, esquemas de la cola offline en AsyncStorage, RPCs o variables de entorno, actualiza la sección correspondiente.
+   - Si cambia el estado de implementación de alguna función o flujo, actualiza el indicador de estado.
+   - Añade una entrada con la fecha y descripción del cambio en la sección **8. Historial de Versiones del Contexto (Changelog)** de `CONTEXTO_SISTEMA.md`.
+
+---
+
 This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
 
 ## Expo has changed — do not trust your training data

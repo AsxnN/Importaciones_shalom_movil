@@ -1,0 +1,277 @@
+@startuml
+skinparam Activity {
+BackgroundColor White
+BorderColor #2C3E50
+BarColor #27AE60
+StartColor #27AE60
+EndColor #E74C3C
+FontColor #34495E
+}
+
+title DIAGRAMA DE ACTIVIDADES - FLUJO DE NAVEGACIÓN Y OPERACIÓN ESCÁNER ESP32-S3
+
+start
+
+:Encendido / Inicio de ESP32-S3;
+:Cargar Configuración Guardada (NVS/EEPROM);
+:Pantalla de Reposo (Standby)\n[Muestra: Batería %, WiFi SSID, Potencia dBm y Almacén Activo];
+
+repeat
+:Operario Presiona Botón / Giro Encoder;
+:Mostrar **1.0 MENÚ PRINCIPAL**;
+
+switch (Opción Seleccionada)
+
+' ==========================================
+' OPCIÓN 1: CONSULTA DE STOCK
+' ==========================================
+case ( 1. Consulta de Stock )
+:Mostrar Sub-Menú Consulta;
+if (¿Método de Consulta?) then (1. Escanear Tag RFID)
+:Pantalla: "Acerque Tag RFID...";
+:Esperar Lectura de Tag;
+:Petición GET /api/paleta/{UID};
+if (¿Respuesta Servidor?) then (200 OK)
+:Mostrar Ficha Técnica del Producto\n(SKU, Unidades, Filas, Ubicación, Estado);
+else (Error / No encontrado)
+:Mostrar Alerta "Producto No Encontrado";
+endif
+:Esperar Confirmación (OK/Atrás);
+else (2. Buscar en Catálogo / Lista BD)
+:Petición GET /api/almacenes/lista;
+:Mostrar Lista de Almacenes;
+:Operario Selecciona Almacén;
+:Petición GET /api/productos?almacen_id={ID};
+:Mostrar Catálogo Filtrado;
+:Operario Selecciona Producto;
+:Mostrar Ficha Acumulada\n(Stock Total, Total Paletas);
+:Esperar Confirmación (OK/Atrás);
+endif
+
+' ==========================================
+' OPCIÓN 2: MOVIMIENTOS (ESCANEAR TAG)
+' ==========================================
+case ( 2. Escanear Tag / Movimientos )
+:Pantalla: "Acerque Tag RFID para operar...";
+:Esperar Lectura de Tag RFID;
+:Obtener Datos del Tag y Stock Actual;
+:Mostrar Menú de Acciones\n(1. Despacho Completo | 2. Retiro Parcial - RF-24);
+
+```
+if (¿Tipo de Movimiento?) then (Despacho Completo)
+  :Seleccionar Destino\n(Tienda, Almacén, Mermas);
+  :Confirmar: "¿Despachar Todo?";
+else (Retiro Parcial)
+  :Seleccionar Motivo (Muestra, Daño, etc.);
+  :Ajustar Cantidad a Restar con Encoder;
+  :Recalcular y Mostrar Nuevo Stock;
+  :Seleccionar Destino del Parcial;
+endif
+
+:Construir JSON con la Transacción;
+
+if (¿Hay Conexión Wi-Fi?) then (Sí)
+  :Enviar Petición POST /api/movimientos;
+  if (¿Respuesta HTTP?) then (200 OK)
+    :Mostrar Pantalla "¡ÉXITO!";
+  else (Error API)
+    :Mostrar "Error Servidor";
+    :Guardar Transacción en LittleFS (Offline);
+  endif
+else (No Wi-Fi)
+  :Guardar Transacción en Memoria Local (LittleFS);
+  :Mostrar "Guardado en Cola Offline";
+endif
+:Esperar 3 segundos o Click del Operario;
+```
+
+' ==========================================
+' OPCIÓN 3: RECEPCIÓN Y CONCILIACIÓN CIEGA (RF-26)
+' MODIFICADA: soporta paletas COMPLETAS + PUCHOS
+' ==========================================
+case ( 3. Recepción / Conciliación Ciega )
+:Petición GET /api/ordenes/pendientes;
+:Seleccionar Orden de Importación;
+:Seleccionar Producto Asociado a la Orden;
+:Inicializar Contador Paletas_Completas = 0;
+:Inicializar Contador Paquetes_Puchos = 0;
+:Activar Modo Escaneo Continuo;
+
+```
+repeat
+  :Pantalla "Acerque paleta al lector...";
+  :Escanear Tag RFID de Paleta;
+
+  if (¿Tag Detectado?) then (Sí)
+    :Asignar Atributo tipo_paleta = "COMPLETO";
+    :Incrementar Paletas_Completas += 1;
+    :Acumular Lectura en Buffer de Recepción\n(uid, tipo=COMPLETO, timestamp);
+    :Emitir Beep de Confirmación;
+    :Mostrar Contador Actualizado\n(Paletas Completas: N);
+  else (No Detectado)
+    :Mostrar "No se detectó Tag, reintente";
+  endif
+
+  :Mostrar Menú de 3 Opciones;
+  note right
+    1. Terminar Escaneo
+    2. Agregar Puchos
+    3. Pausar Escaneo
+  end note
+
+  switch (Opción Elegida)
+
+  case ( 1. Terminar Escaneo )
+    :Marcar Bandera Finalizar_Recepcion = true;
+
+  case ( 2. Agregar Puchos )
+    :Pantalla "Acerque la paleta de Puchos...";
+    :Escanear Tag RFID de Paleta de Puchos;
+
+    if (¿Tag Detectado?) then (Sí)
+      :Asignar Atributo tipo_paleta = "PUCHO";
+      :Solicitar Cantidad de Paquetes con Encoder;
+      :Confirmar Cantidad Ingresada;
+      :Incrementar Paquetes_Puchos += Cantidad Ingresada;
+      :Acumular Lectura en Buffer de Recepción\n(uid, tipo=PUCHO, cantidad_paquetes, timestamp);
+      :Emitir Beep de Confirmación;
+      :Mostrar Contador Actualizado\n(Puchos Acumulados: N paquetes);
+    else (No Detectado)
+      :Mostrar "No se detectó Tag, reintente";
+    endif
+
+    repeat
+      :Mostrar Sub-Menú Puchos;
+      note right
+        1. Escanear Otro Pucho
+        2. Terminar
+      end note
+      if (¿Elección?) then (1. Escanear Otro Pucho)
+        :Pantalla "Acerque la paleta de Puchos...";
+        :Escanear Tag RFID de Paleta de Puchos;
+        if (¿Tag Detectado?) then (Sí)
+          :Solicitar Cantidad de Paquetes con Encoder;
+          :Confirmar Cantidad Ingresada;
+          :Incrementar Paquetes_Puchos += Cantidad Ingresada;
+          :Acumular Lectura\n(uid, tipo=PUCHO, cantidad_paquetes);
+          :Emitir Beep de Confirmación;
+          :Mostrar Contador Actualizado\n(Puchos Acumulados: N paquetes);
+        else (No Detectado)
+          :Mostrar "No se detectó Tag, reintente";
+        endif
+      else (2. Terminar)
+        :Marcar Bandera Finalizar_Recepcion = true;
+      endif
+    repeat while (¿Elección fue "Escanear Otro Pucho" Y NO Finalizar_Recepcion?) is (Sí)
+
+  case ( 3. Pausar Escaneo )
+    :Guardar Buffer de Recepción en LittleFS\n(Sesión Pausada);
+    :Guardar Contadores (Paletas_Completas, Paquetes_Puchos);
+    :Mostrar "Recepción Pausada, puede apagar el equipo";
+    :Regresar a Pantalla Standby;
+    :Esperar Reanudación...;
+    :Operario Selecciona "Reanudar Recepción";
+    :Cargar Sesión Pausada desde LittleFS\n(Buffer, Contadores, Orden, Producto);
+    :Continuar Modo Escaneo Continuo;
+
+  endswitch
+
+repeat while (¿Finalizar_Recepcion == false?) is (Sí)
+
+:Mostrar Resumen Final de Recepción;
+note right
+  Paletas Completas: N
+  Paquetes de Puchos: N
+  Total Registros en Buffer: N
+end note
+
+:Construir JSON con Lote de Lecturas\n(incluye tipo_paleta y cantidad_paquetes por cada registro);
+
+if (¿Hay Conexión Wi-Fi?) then (Sí)
+  :Enviar POST /api/recepcion/conciliar;
+  if (¿Respuesta HTTP?) then (200 OK)
+    :Mostrar Resumen Conciliación\n(Completos, Sobrantes, Faltantes, Puchos);
+  else (Error API)
+    :Mostrar "Error Servidor";
+    :Guardar Lote de Recepción en LittleFS;
+  endif
+else (No Wi-Fi)
+  :Guardar Lote de Recepción en LittleFS;
+  :Mostrar "Recepción Guardada Offline";
+endif
+:Esperar Confirmación (OK/Atrás);
+```
+
+' ==========================================
+' OPCIÓN 4: CONTEO MASIVO / AUDITORÍA ERI (RF-15)
+' ==========================================
+case ( 4. Conteo Masivo / Auditoría ERI )
+:Seleccionar Ubicación / Fila de Almacén;
+:Iniciar Barrido RFID UHF;
+repeat
+:Capturar Tags Únicos en Zona;
+:Mostrar Contador de Tags Detectados + Beep;
+repeat while (¿Gatillo Presionado / Continuar?) is (Sí)
+:Enviar POST /api/auditoria/eri;
+:Mostrar Cálculo ERI % (Físico vs Sistema);
+:Esperar Confirmación (OK/Atrás);
+
+' ==========================================
+' OPCIÓN 5: COLA PENDIENTES (OFFLINE)
+' ==========================================
+case ( 5. Cola Pendientes Offline )
+:Leer Registros Guardados en LittleFS;
+:Mostrar Cantidad de Transacciones Offline;
+if (¿Operario Elige "Sincronizar"?) then (Sí)
+if (¿Wi-Fi Disponible?) then (Sí)
+while (¿Quedan Registros en Cola?) is (Sí)
+:Leer Petición de la Memoria;
+:Enviar POST a la API Correspondiente;
+:Eliminar Registro Procesado;
+endwhile
+:Mostrar "Sincronización Exitosa";
+else (Sin Red)
+:Mostrar Alerta "Sin Conexión a Internet";
+endif
+else (Ver / Limpiar)
+:Mostrar Detalle de Pendientes o Vaciar Cola;
+endif
+:Esperar Confirmación (OK/Atrás);
+
+' ==========================================
+' OPCIÓN 6: INFO / SISTEMA
+' ==========================================
+case ( 6. Info / Sistema )
+:Leer Sensores e Interfaces (ADC, RSSI WiFi);
+:Realizar Ping / HealthCheck al Servidor;
+:Desplegar Pantalla Diagnóstico en Tiempo Real:\n- WiFi SSID, Signal (dBm), IP\n- Batería %, Voltaje (V)\n- Status Servidor (ms)\n- Firmware y MAC Address;
+:Esperar Presión de Botón (OK/Atrás);
+
+' ==========================================
+' OPCIÓN 7: CONFIGURACIÓN
+' ==========================================
+case ( 7. Configuración )
+if (¿Ajuste a Realizar?) then (Seleccionar Almacén Activo)
+:Petición GET /api/almacenes/lista;
+:Mostrar Lista Desplegable de Almacenes;
+:Operario Selecciona Nuevo Almacén Activo;
+:Guardar ID de Almacén en EEPROM/NVS;
+:Mostrar "Almacén Actualizado";
+else (Potencia RF / Pantalla)
+:Ajustar Potencia dBm (20/23/26 dBm) / Brillo OLED / Standby;
+:Guardar Configuración en NVS;
+endif
+:Esperar Confirmación (OK/Atrás);
+
+endswitch
+
+:¿Pasaron 30s sin interacción?;
+if (Inactividad Detectada) then (Sí)
+:Regresar a Pantalla Standby;
+else (No)
+endif
+
+repeat while (¿Mantener Equipo Encendido?) is (Sí)
+
+stop
+@enduml
